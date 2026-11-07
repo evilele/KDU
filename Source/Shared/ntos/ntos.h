@@ -1686,6 +1686,42 @@ typedef struct _PS_PROTECTION {
     };
 } PS_PROTECTION, *PPS_PROTECTION;
 
+typedef enum _PS_SECTION_SIGNATURE_LEVEL {
+    CiLevelUnchecked,
+    CiLevelUnsigned,
+    CiLevelEnterprise,
+    CiLevelCustom1,
+    CiLevelAuthenticode,
+    CiLevelCustom2,
+    CiLevelStore,
+    CiLevelAntimalware,
+    CiLevelMicrosoft,
+    CiLevelCustom4,
+    CiLevelCustom5,
+    CiLevelDynCodeGen,
+    CiLevelWindows,
+    CiLevelWindowsPPL,
+    CiLevelWindowsTcb,
+    CiLevelCustom6
+} PS_SECTION_SIGNATURE_LEVEL; // https://www.alex-ionescu.com/146/
+
+typedef struct _PS_SECTION_SIGNATURE {
+    UCHAR SignatureLevel;
+} PS_SECTION_SIGNATURE, * PPS_SECTION_SIGNATURE;
+
+typedef enum _PROTECTION_TYPE {
+    PPLProtection,
+    SectionSigningProtection
+} PROTECTION_TYPE;
+
+typedef struct _PROTECTION_INFO {
+    PROTECTION_TYPE ProtType;
+    union {
+        PS_PROTECTION PsProtection;
+        PS_SECTION_SIGNATURE SectionSignature;
+    } Protection;
+} PROTECTION_INFO, * PPROTECTION_INFO;
+
 // begin_rev
 #define PS_ATTRIBUTE_NUMBER_MASK 0x0000ffff
 #define PS_ATTRIBUTE_THREAD 0x00010000 

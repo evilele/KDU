@@ -26,6 +26,7 @@ BOOL g_UseLA57 = FALSE;
 #define CMD_MAP         L"-map"
 #define CMD_SCV         L"-scv"
 #define CMD_PS          L"-ps"
+#define CMD_PSS         L"-pss"
 #define CMD_PSE         L"-pse"
 #define CMD_PSW         L"-psw"
 #define CMD_PM          L"-pm"
@@ -55,6 +56,7 @@ BOOL g_UseLA57 = FALSE;
                      "kdu -prv id         - Optional, sets provider id to be used with rest of commands, default 0\r\n"\
                      "kdu -dmp pid        - Dump virtual memory of the given process\r\n"\
                      "kdu -ps pid         - Disable ProtectedProcess for given pid\r\n"\
+                     "kdu -pss pid        - Disable DLL signature level for given pid\r\n"\
                      "kdu -pse cmdline    - Launch program as PsProtectedSignerAntimalware-Light\r\n"\
                      "kdu -psw cmdline    - Launch program as PsProtectedSignerWinTcb-Light\r\n"\
                      "kdu -pm pid         - Overwrites Process MitigationsFlags1 and 2 with 0x0 for given pid\r\n"\
@@ -183,7 +185,7 @@ INT KDUOpenProcessInheritHandle(
     _In_ ULONG ProviderId,
     _In_ ULONG_PTR TargetProcessId,
     _In_ BOOL OpenThreads,
-    _In_ ULONG_PTR PPLLevel,
+    _In_ ULONG_PTR PPLsigner,
     _In_ LPWSTR CommandLine
 )
 {
@@ -197,7 +199,7 @@ INT KDUOpenProcessInheritHandle(
         ActionTypeOpenProcessHandle);
 
     if (provContext) {
-        retVal = KDURunCommandInheritee(provContext, CommandLine, TargetProcessId, OpenThreads, PPLLevel);
+        retVal = KDURunCommandInheritee(provContext, CommandLine, TargetProcessId, OpenThreads, PPLsigner);
         KDUProviderRelease(provContext);
     }
 
@@ -209,14 +211,15 @@ INT KDUOpenProcessInheritHandle(
 *
 * Purpose:
 *
-* Handle -ps switch.
+* Handle -ps and -pss switch.
 *
 */
 INT KDUProcessPSObjectSwitch(
     _In_ ULONG HvciEnabled,
     _In_ ULONG NtBuildNumber,
     _In_ ULONG ProviderId,
-    _In_ ULONG_PTR ProcessId
+    _In_ ULONG_PTR ProcessId,
+	_In_ PROTECTION_TYPE ProtectionType
 )
 {
     INT retVal = 0;
@@ -229,7 +232,18 @@ INT KDUProcessPSObjectSwitch(
         ActionTypeDKOM);
 
     if (provContext) {
-        retVal = KDUUnprotectProcess(provContext, ProcessId);
+
+        PROTECTION_INFO protInfo = { };
+		protInfo.ProtType = ProtectionType;
+
+		if (ProtectionType == PPLProtection) {
+            protInfo.Protection.PsProtection.Signer = PsProtectedSignerNone;
+            protInfo.Protection.PsProtection.Type = PsProtectedTypeNone;
+		}
+		else if (ProtectionType == SectionSigningProtection) {
+			protInfo.Protection.SectionSignature.SignatureLevel = CiLevelUnchecked;
+		}
+        retVal = KDUControlProcessProtections(provContext, ProcessId, &protInfo);
         KDUProviderRelease(provContext);
     }
 
@@ -640,7 +654,23 @@ INT KDUProcessCommandLine(
                     retVal = KDUProcessPSObjectSwitch(HvciEnabled,
                         NtBuildNumber,
                         providerId,
-                        processId);
+                        processId,
+                        PROTECTION_TYPE::PPLProtection);
+                }
+
+                else if (supGetCommandLineOption(CMD_PSS,
+                    TRUE,
+                    szParameter,
+                    RTL_NUMBER_OF(szParameter),
+                    NULL))
+                {
+                    processId = strtou64(szParameter);
+
+                    retVal = KDUProcessPSObjectSwitch(HvciEnabled,
+                        NtBuildNumber,
+                        providerId,
+                        processId,
+                        PROTECTION_TYPE::SectionSigningProtection);
                 }
 
                 else if (supGetCommandLineOption(CMD_PM,
@@ -725,7 +755,7 @@ INT KDUProcessCommandLine(
                     WCHAR szCmdLine[MAX_PATH] = { 0 };
                     _strcpy(szCmdLine, POWERSHELL_EXE); // default command line
 
-                    ULONG_PTR level = 0;
+                    ULONG_PTR pplSigner = 0;
 					BOOL openThreads = FALSE;
 
                     if (supGetCommandLineOption(CMD_PHT,
@@ -752,10 +782,10 @@ INT KDUProcessCommandLine(
                         RTL_NUMBER_OF(szParameter),
                         NULL))
                     {
-                        level = strtou64(szParameter);
-                        if (level > 8) {
+                        pplSigner = strtou64(szParameter);
+                        if (pplSigner > PS_PROTECTED_SIGNER::PsProtectedSignerMax) {
                             supPrintfEvent(kduEventError,
-                                "[!] Unsupported PPL level for Open Process Handle\r\n");
+                                "[!] Unsupported PPL signer level for Open Process Handle\r\n");
                             return 1;
                         }
                     }
@@ -765,7 +795,7 @@ INT KDUProcessCommandLine(
                         providerId,
                         processId,
                         openThreads,
-                        level,
+                        pplSigner,
                         szCmdLine);
                 }
 

@@ -24,25 +24,33 @@
 #define PsProtectionOffset_10586 0x6B2
 #define PsProtectionOffset_14393 0x6C2
 #define PsProtectionOffset_15063 0x6CA //same for 16299, 17134, 17763
-#define PsProtectionOffset_18362 0x6FA
-#define PsProtectionOffset_18363 0x6FA
+#define PsProtectionOffset_18362 0x6FA //same for 18363
 #define PsProtectionOffset_19041 0x87A //same for 19042..19045
 #define PsProtectionOffset_26100 0x5FA //same for 26100..26200 (24H2, 25H2)
 
-//RS3..RS4
-#define PsMitigationFlags1Offset_RS3    0x828
-#define PsMitigationFlags2Offset_RS3    0x82c
+#define SectionSignatureLevelOffset_9600  0x679
+#define SectionSignatureLevelOffset_10240 0x6A9
+#define SectionSignatureLevelOffset_10586 0x6B1
+#define SectionSignatureLevelOffset_14393 0x6C1
+#define SectionSignatureLevelOffset_15063 0x6C9 //same for 16299, 17134, 17763
+#define SectionSignatureLevelOffset_18362 0x6F9 //same for 18363
+#define SectionSignatureLevelOffset_19041 0x879 //same for 19042..19045
+#define SectionSignatureLevelOffset_26100 0x5F9 //same for 26100..26200 (24H2, 25H2)
 
-#define PsMitigationFlags1Offset_RS5    0x820
-#define PsMitigationFlags2Offset_RS5    0x824
+//RS3..RS4
+#define PsMitigationFlags1Offset_RS3   0x828
+#define PsMitigationFlags2Offset_RS3   0x82c
+
+#define PsMitigationFlags1Offset_RS5   0x820
+#define PsMitigationFlags2Offset_RS5   0x824
 
 // 1903..1909
-#define PsMitigationFlags1Offset_18362  0x850
-#define PsMitigationFlags2Offset_18362  0x854
+#define PsMitigationFlags1Offset_18362 0x850
+#define PsMitigationFlags2Offset_18362 0x854
 
 // 2004..23H2
-#define PsMitigationFlags1Offset_19041  0x9d0
-#define PsMitigationFlags2Offset_19041  0x9d4
+#define PsMitigationFlags1Offset_19041 0x9d0
+#define PsMitigationFlags2Offset_19041 0x9d4
 
 //24H2..25H2
 #define PsMitigationFlags1Offset_26100 0x750
@@ -62,6 +70,7 @@
 #define HandleTableOffset_all 0x8 // XP..25H2
 
 #define EPROCESS_TO_PROTECTION(Object, Offset) ((ULONG_PTR)(Object) + (Offset))
+#define EPROCESS_TO_SECTION_SIGNATURE_LEVEL(Object, Offset) ((ULONG_PTR)(Object) + (Offset))
 #define EPROCESS_TO_MITIGATIONFLAGS(Object, FlagsOffset) ((ULONG_PTR)(Object) + (FlagsOffset))
 
 #define EPROCESS_TO_OBJECTTABLE(Object, Offset) ((ULONG_PTR)(Object) + (Offset))
@@ -69,6 +78,7 @@
 
 typedef struct _KDU_EPROCESS_OFFSETS {
     ULONG_PTR PsProtectionOffset;
+    ULONG_PTR SectionSignatureLevel;
     ULONG_PTR MitigationFlags1Offset;
     ULONG_PTR MitigationFlags2Offset;
     ULONG_PTR ObjectTableOffset;
@@ -78,10 +88,6 @@ typedef struct _KDU_EPROCESS_OFFSETS {
 BOOL KDUGetEprocessOffsets(
     _In_ ULONG NtBuildNumber,
     _Out_ PKDU_EPROCESS_OFFSETS Offsets);
-
-BOOL KDUUnprotectProcess(
-    _In_ PKDU_CONTEXT Context,
-    _In_ ULONG_PTR ProcessId);
 
 BOOL KDUUnmitigateProcess(
     _In_ PKDU_CONTEXT Context,
@@ -101,8 +107,7 @@ BOOL KDUDumpProcessMemory(
 BOOL KDUControlProcessProtections(
     _In_ PKDU_CONTEXT Context,
     _In_ ULONG_PTR ProcessId,
-    _In_ PS_PROTECTED_SIGNER PsProtectionSigner,
-    _In_ PS_PROTECTED_TYPE PsProtectionType);
+    _In_ PROTECTION_INFO *ProtectionInfo);
 
 BOOL KDUControlProcessMitigationFlags(
     _In_ PKDU_CONTEXT Context,
